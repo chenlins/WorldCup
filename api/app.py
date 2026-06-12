@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import yaml
@@ -7,7 +8,11 @@ from fastapi.staticfiles import StaticFiles
 from data.fixtures import TOURNAMENT_END, TOURNAMENT_START, all_match_dates
 from predictor.engine import predict_by_date, predict_match, prediction_to_dict
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+def _web_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "web"  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parent.parent / "web"
 
 
 def create_app(config_path: str = "config.yaml") -> FastAPI:
@@ -44,5 +49,5 @@ def create_app(config_path: str = "config.yaml") -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
-    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+    app.mount("/", StaticFiles(directory=str(_web_dir()), html=True), name="web")
     return app
