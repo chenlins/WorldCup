@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>2026 世界杯赛事分析</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <h1>2026 世界杯赛事分析</h1>
+          <p>选择比赛日期，获取当日全部场次的胜平负概率、比分预测与专业战术解读。</p>
+        </div>
+        <button id="runBtn" class="primary">开始分析</button>
+      </section>
+
+      <section class="workspace">
+        <aside class="filters" aria-label="筛选条件">
+          <label>
+            <span>比赛日期</span>
+            <input id="matchDate" type="date" value="2026-06-11" min="2026-06-11" max="2026-07-19" />
+          </label>
+          <label>
+            <span>赛事阶段</span>
+            <select id="stageFilter">
+              <option value="all">全部阶段</option>
+              <option value="小组赛">小组赛</option>
+              <option value="32强">32强</option>
+              <option value="16强">16强</option>
+              <option value="8强">8强</option>
+              <option value="半决赛">半决赛</option>
+              <option value="三四名决赛">三四名决赛</option>
+              <option value="决赛">决赛</option>
+            </select>
+          </label>
+          <label>
+            <span>置信度筛选</span>
+            <select id="confidenceFilter">
+              <option value="0">不限</option>
+              <option value="0.45">≥ 45%</option>
+              <option value="0.50">≥ 50%</option>
+              <option value="0.55">≥ 55%</option>
+            </select>
+          </label>
+          <label class="check-row">
+            <input id="hideDraw" type="checkbox" />
+            <span>隐藏低平局概率场次</span>
+          </label>
+          <details class="advanced">
+            <summary>分析模型说明</summary>
+            <p class="model-note">
+              基于球队实力评分、进攻/防守指数、东道主加成与泊松进球模型，综合计算胜平负概率与最可能比分。淘汰赛场次含席位推断不确定性提示。
+            </p>
+          </details>
+          <button id="helpBtn" class="text-btn" type="button">查看分析维度说明 ?</button>
+        </aside>
+
+        <section class="content">
+          <div id="status" class="status">选择日期后点击「开始分析」</div>
+          <section id="helpPanel" class="help-panel hidden" aria-live="polite">
+            <div class="help-head">
+              <h2>分析维度说明</h2>
+              <button id="helpClose" class="text-btn" type="button">关闭</button>
+            </div>
+            <div class="help-body">
+              <div class="help-item">
+                <h3>胜平负概率</h3>
+                <ul>
+                  <li>通过泊松分布模拟 0-5 球各种比分组合。</li>
+                  <li>汇总为主胜、平局、客胜三项概率。</li>
+                  <li>淘汰赛平局按加时后各半分配至双方晋级概率。</li>
+                </ul>
+              </div>
+              <div class="help-item">
+                <h3>比分预测</h3>
+                <ul>
+                  <li>展示期望进球（xG）与概率最高的前 5 个比分。</li>
+                  <li>期望进球由攻防指数、实力差与赛段系数共同决定。</li>
+                </ul>
+              </div>
+              <div class="help-item">
+                <h3>战术解读</h3>
+                <ul>
+                  <li>结合双方风格给出压迫/防反等战术倾向判断。</li>
+                  <li>东道主、出线形势等情境因素纳入分析。</li>
+                </ul>
+              </div>
+              <div class="help-item">
+                <h3>置信度</h3>
+                <ul>
+                  <li>最高单项概率（胜/平/负）作为本场预测置信度。</li>
+                  <li>置信度低于 45% 通常表示势均力敌或冷门可能较大。</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="featured" class="recommendation hidden"></section>
+
+          <section class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>场次</th>
+                  <th>对阵</th>
+                  <th>阶段</th>
+                  <th>开球(ET)</th>
+                  <th>预测比分</th>
+                  <th>胜平负</th>
+                  <th>置信度</th>
+                  <th>关键因素</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="rows">
+                <tr>
+                  <td colspan="9" class="empty">暂无数据</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <div id="detailModal" class="chart-modal hidden" role="dialog" aria-modal="true">
+      <div class="chart-dialog detail-dialog">
+        <div class="chart-dialog-head">
+          <h2 id="detailTitle">比赛详情</h2>
+          <button id="detailClose" class="text-btn" type="button">关闭</button>
+        </div>
+        <div id="detailBody" class="detail-body"></div>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
