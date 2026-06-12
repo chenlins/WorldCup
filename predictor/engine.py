@@ -7,7 +7,14 @@ import random
 from dataclasses import dataclass, field
 
 from data.fixtures import FIXTURE_BY_ID, Fixture, fixtures_by_date
+from data.team_profiles import get_team_profile
 from data.teams import TEAMS, Team, expected_team_from_slot, get_team, group_standings_prediction
+from predictor.dimensions import (
+    MatchDimensionAnalysis,
+    analyze_match_dimensions,
+    dimensions_to_dict,
+    finalize_verdict,
+)
 
 # 固定种子保证预测可复现
 random.seed(2026)
@@ -49,6 +56,7 @@ class MatchPrediction:
     key_factors: list[str]
     is_knockout: bool
     uncertainty_note: str = ""
+    dimensions: dict = field(default_factory=dict)
 
 
 STAGE_XG_FACTOR = {
@@ -118,7 +126,13 @@ def _host_bonus(team: Team, city: str) -> float:
     return 0.0
 
 
-def _expected_goals(home: Team, away: Team, stage: str, city: str) -> tuple[float, float]:
+def _expected_goals(
+    home: Team,
+    away: Team,
+    stage: str,
+    city: str,
+    dim: MatchDimensionAnalysis | None = None,
+) -> tuple[float, float]:
     factor = STAGE_XG_FACTOR.get(stage, 1.0)
     base = 2.55 * factor
 
@@ -133,6 +147,10 @@ def _expected_goals(home: Team, away: Team, stage: str, city: str) -> tuple[floa
 
     lam_home = base * 0.52 * home_attack * away_defense * (1 + rating_diff + home_bonus)
     lam_away = base * 0.48 * away_attack * home_defense * (1 - rating_diff + away_penalty)
+
+    if dim:
+        lam_home *= dim.xg_home_adj
+        lam_away *= dim.xg_away_adj
 
     lam_home = max(0.35, min(3.2, lam_home))
     lam_away = max(0.30, min(2.8, lam_away))
@@ -184,6 +202,7 @@ def _build_analysis(
     loss_p: float,
     top: list[ScoreLine],
     uncertain: bool,
+    dim: MatchDimensionAnalysis | None = None,
 ) -> tuple[list[str], str, list[str], str]:
     reasons: list[str] = []
     factors: list[str] = []
@@ -230,11 +249,28 @@ def _build_analysis(
     else:
         reasons.append(f"综合胜率：客胜 {loss_p*100:.1f}% 为最高概率结果。")
 
-    tactical = (
-        f"{home.name_zh} 预期 xG {lam_h:.2f}，倾向{'高位压迫' if home.attack > away.defense else '稳守反击'}；"
-        f"{away.name_zh} 预期 xG {lam_a:.2f}，"
-        f"{'客场采取防反' if away.rating < home.rating else '有能力在中场争夺主导权'}。"
-    )
+    if dim:
+        ht = get_team_profile(home.code, home.rating, home.attack, home.defense).tactics
+        at = get_team_profile(away.code, away.rating, away.attack, away.defense).tactics
+        tactical = (
+            f"{home.name_zh}（{ht.style}）预期 xG {lam_h:.2f}，九维修正系数 {dim.xg_home_adj:.2f}；"
+            f"{away.name_zh}（{at.style}）预期 xG {lam_a:.2f}，修正系数 {dim.xg_away_adj:.2f}。"
+            f"风格碰撞：{dim.tactical.summary}。"
+        )
+        if dim.key_players.summary:
+            reasons.append(f"人员层面：{dim.key_players.summary}。")
+        if dim.external.summary:
+            factors.append("外部因素")
+        verdict = dim.analyst_verdict
+        if verdict.risk_tags:
+            factors.extend(t for t in verdict.risk_tags[:2] if t not in factors)
+        reasons.append(verdict.summary)
+    else:
+        tactical = (
+            f"{home.name_zh} 预期 xG {lam_h:.2f}，倾向{'高位压迫' if home.attack > away.defense else '稳守反击'}；"
+            f"{away.name_zh} 预期 xG {lam_a:.2f}，"
+            f"{'客场采取防反' if away.rating < home.rating else '有能力在中场争夺主导权'}。"
+        )
 
     uncertainty = ""
     if uncertain:
@@ -269,17 +305,34 @@ def _predict_match_internal(
         home_disp, away_disp = hd, ad
         uncertain = hu or au
 
-    lam_h, lam_a = _expected_goals(home, away, fixture.stage, fixture.city)
+    dim = analyze_match_dimensions(home, away, fixture)
+    lam_h, lam_a = _expected_goals(home, away, fixture.stage, fixture.city, dim)
     scores = _score_distribution(lam_h, lam_a, fixture.is_knockout)
     win_p, draw_p, loss_p = _outcome_probs(scores, fixture.is_knockout)
 
+    finalize_verdict(dim, home, away, fixture, win_p, draw_p, loss_p)
+
     best = scores[0]
     outcome = "主胜" if win_p >= draw_p and win_p >= loss_p else ("平局" if draw_p >= loss_p else "客胜")
-    confidence = max(win_p, draw_p, loss_p)
+    confidence = max(0.32, min(0.92, max(win_p, draw_p, loss_p) + dim.confidence_adj))
 
     reasons, tactical, factors, uncertainty = _build_analysis(
-        home, away, fixture, lam_h, lam_a, win_p, draw_p, loss_p, scores, uncertain
+        home, away, fixture, lam_h, lam_a, win_p, draw_p, loss_p, scores, uncertain, dim
     )
+
+    for label, block in [
+        ("近期状态", dim.team_basics),
+        ("历史交锋", dim.head_to_head),
+        ("核心伤停", dim.key_players),
+        ("战术克制", dim.tactical),
+        ("场地因素", dim.external),
+        ("大赛底蕴", dim.tournament_pedigree),
+        ("阵容深度", dim.squad_depth),
+        ("进阶数据", dim.advanced_metrics),
+        ("赛程负荷", dim.schedule_load),
+    ]:
+        if block.impact and label not in factors:
+            factors.append(label)
 
     return MatchPrediction(
         match_id=fixture.id,
@@ -309,6 +362,7 @@ def _predict_match_internal(
         key_factors=factors,
         is_knockout=fixture.is_knockout,
         uncertainty_note=uncertainty,
+        dimensions=dimensions_to_dict(dim),
     )
 
 
@@ -398,4 +452,5 @@ def prediction_to_dict(p: MatchPrediction) -> dict:
         "key_factors": p.key_factors,
         "is_knockout": p.is_knockout,
         "uncertainty_note": p.uncertainty_note,
+        "dimensions": p.dimensions,
     }

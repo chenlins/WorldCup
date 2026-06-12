@@ -37,6 +37,78 @@ function outcomeClass(outcome) {
   return "neutral";
 }
 
+function renderDimensionBlock(block) {
+  if (!block) return "";
+  const points = (block.points || [])
+    .slice(0, 5)
+    .map((p) => `<li>${escapeHtml(p)}</li>`)
+    .join("");
+  const impact = block.impact
+    ? `<div class="dim-impact">影响：${escapeHtml(block.impact)}</div>`
+    : "";
+  return `
+    <div class="dim-section">
+      <h3>${escapeHtml(block.title)}</h3>
+      <p class="dim-summary">${escapeHtml(block.summary || "")}</p>
+      <ul class="dim-points">${points}</ul>
+      ${impact}
+    </div>
+  `;
+}
+
+function renderAnalystVerdict(verdict) {
+  if (!verdict) return "";
+  const tags = (verdict.risk_tags || [])
+    .map((t) => `<span class="risk-tag">${escapeHtml(t)}</span>`)
+    .join("");
+  const caveats = (verdict.caveats || [])
+    .map((c) => `<li>${escapeHtml(c)}</li>`)
+    .join("");
+  const confClass =
+    verdict.confidence_level === "高"
+      ? "positive"
+      : verdict.confidence_level === "低"
+        ? "negative"
+        : "neutral";
+  return `
+    <div class="verdict-box">
+      <h3>分析师综合研判</h3>
+      <p class="verdict-summary">${escapeHtml(verdict.summary || "")}</p>
+      <p><strong class="${confClass}">置信度：${escapeHtml(verdict.confidence_level || "中")}</strong>
+        · ${escapeHtml(verdict.recommendation || "")}</p>
+      <div class="risk-tags">${tags}</div>
+      <ul class="caveat-list">${caveats}</ul>
+    </div>
+  `;
+}
+
+function renderDimensions(dim) {
+  if (!dim) return "";
+  const adj = dim.xg_adjustments || {};
+  const count = dim.dimension_count || 9;
+  return `
+    <div>
+      <h3>${count}维综合分析</h3>
+      <div class="xg-adj-bar">
+        <span>九维修正系数：主队 <strong>${adj.home ?? "—"}</strong></span>
+        <span>客队 <strong>${adj.away ?? "—"}</strong></span>
+      </div>
+      ${renderAnalystVerdict(dim.analyst_verdict)}
+      <div class="help-body dim-grid" style="margin-top:12px">
+        ${renderDimensionBlock(dim.team_basics)}
+        ${renderDimensionBlock(dim.head_to_head)}
+        ${renderDimensionBlock(dim.key_players)}
+        ${renderDimensionBlock(dim.tactical)}
+        ${renderDimensionBlock(dim.external)}
+        ${renderDimensionBlock(dim.tournament_pedigree)}
+        ${renderDimensionBlock(dim.squad_depth)}
+        ${renderDimensionBlock(dim.advanced_metrics)}
+        ${renderDimensionBlock(dim.schedule_load)}
+      </div>
+    </div>
+  `;
+}
+
 function applyFilters(matches) {
   const stage = stageFilterEl.value;
   const minConf = Number(confidenceFilterEl.value);
@@ -72,10 +144,21 @@ function renderFeatured(match) {
       <div class="metric"><span>主胜 / 平 / 客胜</span><strong>${fmtPct(match.win_prob)} / ${fmtPct(match.draw_prob)} / ${fmtPct(match.loss_prob)}</strong></div>
       <div class="metric"><span>期望进球 xG</span><strong>${match.predicted_home_goals} : ${match.predicted_away_goals}</strong></div>
     </div>
+    ${
+      match.dimensions?.analyst_verdict
+        ? `<div class="verdict-box compact-verdict">
+            <p class="verdict-summary">${escapeHtml(match.dimensions.analyst_verdict.summary)}</p>
+            <div class="risk-tags">${(match.dimensions.analyst_verdict.risk_tags || [])
+              .slice(0, 4)
+              .map((t) => `<span class="risk-tag">${escapeHtml(t)}</span>`)
+              .join("")}</div>
+          </div>`
+        : ""
+    }
     <ol class="reasons">
-      ${match.analysis.slice(0, 4).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
+      ${match.analysis.slice(0, 3).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
     </ol>
-    <div class="disclaimer">预测仅供参考，基于统计模型与赛前实力评估，不含伤病、红牌等临场因素。</div>
+    <div class="disclaimer">预测基于九维专业分析 + 分析师研判。足球偶然性极强，请结合风险标签理性参考。</div>
   `;
 }
 
@@ -148,8 +231,9 @@ function renderDetail(match) {
     <div class="tactical-box">
       <strong>战术展望：</strong>${escapeHtml(match.tactical)}
     </div>
+    ${renderDimensions(match.dimensions)}
     ${match.uncertainty_note ? `<div class="warn-box">${escapeHtml(match.uncertainty_note)}</div>` : ""}
-    <div class="disclaimer">本分析由统计模型生成，不构成投注建议。实际结果受临场发挥、裁判、天气等多因素影响。</div>
+    <div class="disclaimer">本分析由五维综合模型生成，不构成投注建议。红牌、点球误判、临场伤病等不可预测因素仍可能改变结果。</div>
   `;
   detailModal.classList.remove("hidden");
 }
