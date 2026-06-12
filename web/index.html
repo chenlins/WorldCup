@@ -11,7 +11,7 @@
       <section class="topbar">
         <div>
           <h1>2026 世界杯赛事分析</h1>
-          <p>选择比赛日期，基于九维专业分析框架（含大赛底蕴、阵容深度、进阶数据、赛程负荷）综合预判比分，并附分析师研判与风险标签。</p>
+          <p>选择比赛日期，基于十维专业分析框架（含市场共识校验、出线形势、赛程负荷等）综合预判比分，并附分析师研判与风险标签。</p>
         </div>
         <button id="runBtn" class="primary">开始分析</button>
       </section>
@@ -48,10 +48,14 @@
             <input id="hideDraw" type="checkbox" />
             <span>隐藏低平局概率场次</span>
           </label>
+          <label class="check-row">
+            <input id="marketDivOnly" type="checkbox" />
+            <span>仅显示市场分歧场次</span>
+          </label>
           <details class="advanced">
             <summary>分析模型说明</summary>
             <p class="model-note">
-              九维加权修正 + 泊松模型 + 分析师研判：在基础五维之上，纳入大赛底蕴、阵容深度、零封/晚进球等进阶数据、北美三国产能旅行负荷，输出胜平负概率、风险标签与置信度评级。足球偶然性极强，预测仅供参考。
+              十维加权修正 + 泊松模型 + 市场交叉验证：在九维基础上增加市场隐含概率校验，自动标注「市场分歧」场次；小组赛纳入出线轮次与积分需求分析。足球偶然性极强，预测仅供参考。
             </p>
           </details>
           <button id="helpBtn" class="text-btn" type="button">查看分析维度说明 ?</button>
@@ -138,11 +142,19 @@
                 </ul>
               </div>
               <div class="help-item">
+                <h3>十、市场共识</h3>
+                <ul>
+                  <li>由 FIFA 排名与实力指数推导隐含胜率与参考赔率。</li>
+                  <li>与模型概率对比，分歧 ≥12pp 标注「市场分歧」。</li>
+                  <li>市场一致时预判稳定性更高，分歧大建议观望。</li>
+                </ul>
+              </div>
+              <div class="help-item">
                 <h3>分析师综合研判</h3>
                 <ul>
-                  <li>九维修正 xG 输入泊松模型，输出胜平负与 Top5 比分。</li>
-                  <li>风险标签：平局陷阱、冷门预警、伤病扰动、淘汰赛点球等。</li>
-                  <li>置信度分高/中/低三级，足球不存在绝对精准预测。</li>
+                  <li>十维修正 xG 输入泊松模型，输出胜平负与 Top5 比分。</li>
+                  <li>风险标签：市场分歧、平局陷阱、冷门预警、淘汰赛点球等。</li>
+                  <li>小组赛含出线轮次、积分需求与战意强度评估。</li>
                 </ul>
               </div>
             </div>

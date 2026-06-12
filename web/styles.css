@@ -308,6 +308,37 @@ select {
   font-size: 13px;
 }
 
+.market-compare {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafbfc;
+}
+
+.market-compare h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.compare-table th {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .help-item {
   border: 1px solid var(--line);
   border-radius: 8px;

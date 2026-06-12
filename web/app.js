@@ -8,6 +8,7 @@ const matchDateEl = $("matchDate");
 const stageFilterEl = $("stageFilter");
 const confidenceFilterEl = $("confidenceFilter");
 const hideDrawEl = $("hideDraw");
+const marketDivOnlyEl = $("marketDivOnly");
 const helpBtn = $("helpBtn");
 const helpPanel = $("helpPanel");
 const helpClose = $("helpClose");
@@ -82,17 +83,36 @@ function renderAnalystVerdict(verdict) {
   `;
 }
 
-function renderDimensions(dim) {
+function renderMarketCompare(match, dim) {
+  const mkt = dim?.market_implied;
+  if (!mkt || !mkt.home_win) return "";
+  return `
+    <div class="market-compare">
+      <h3>模型 vs 市场</h3>
+      <table class="compare-table">
+        <thead><tr><th>结果</th><th>模型</th><th>市场隐含</th><th>参考赔率</th></tr></thead>
+        <tbody>
+          <tr><td>主胜</td><td class="positive">${fmtPct(match.win_prob)}</td><td>${fmtPct(mkt.home_win)}</td><td>${mkt.odds?.home ?? "—"}</td></tr>
+          <tr><td>平局</td><td class="neutral">${fmtPct(match.draw_prob)}</td><td>${fmtPct(mkt.draw)}</td><td>${mkt.odds?.draw ?? "—"}</td></tr>
+          <tr><td>客胜</td><td class="negative">${fmtPct(match.loss_prob)}</td><td>${fmtPct(mkt.away_win)}</td><td>${mkt.odds?.away ?? "—"}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderDimensions(dim, match) {
   if (!dim) return "";
   const adj = dim.xg_adjustments || {};
-  const count = dim.dimension_count || 9;
+  const count = dim.dimension_count || 10;
   return `
     <div>
       <h3>${count}维综合分析</h3>
       <div class="xg-adj-bar">
-        <span>九维修正系数：主队 <strong>${adj.home ?? "—"}</strong></span>
+        <span>十维修正系数：主队 <strong>${adj.home ?? "—"}</strong></span>
         <span>客队 <strong>${adj.away ?? "—"}</strong></span>
       </div>
+      ${match ? renderMarketCompare(match, dim) : ""}
       ${renderAnalystVerdict(dim.analyst_verdict)}
       <div class="help-body dim-grid" style="margin-top:12px">
         ${renderDimensionBlock(dim.team_basics)}
@@ -104,20 +124,28 @@ function renderDimensions(dim) {
         ${renderDimensionBlock(dim.squad_depth)}
         ${renderDimensionBlock(dim.advanced_metrics)}
         ${renderDimensionBlock(dim.schedule_load)}
+        ${renderDimensionBlock(dim.market_consensus)}
       </div>
     </div>
   `;
+}
+
+function hasMarketDivergence(match) {
+  const tags = match.dimensions?.analyst_verdict?.risk_tags || [];
+  return tags.includes("市场分歧");
 }
 
 function applyFilters(matches) {
   const stage = stageFilterEl.value;
   const minConf = Number(confidenceFilterEl.value);
   const hideDraw = hideDrawEl.checked;
+  const marketDivOnly = marketDivOnlyEl.checked;
 
   return matches.filter((m) => {
     if (stage !== "all" && m.stage !== stage) return false;
     if (m.confidence < minConf) return false;
     if (hideDraw && m.draw_prob < 0.22) return false;
+    if (marketDivOnly && !hasMarketDivergence(m)) return false;
     return true;
   });
 }
@@ -231,7 +259,7 @@ function renderDetail(match) {
     <div class="tactical-box">
       <strong>战术展望：</strong>${escapeHtml(match.tactical)}
     </div>
-    ${renderDimensions(match.dimensions)}
+    ${renderDimensions(match.dimensions, match)}
     ${match.uncertainty_note ? `<div class="warn-box">${escapeHtml(match.uncertainty_note)}</div>` : ""}
     <div class="disclaimer">本分析由五维综合模型生成，不构成投注建议。红牌、点球误判、临场伤病等不可预测因素仍可能改变结果。</div>
   `;
@@ -277,6 +305,7 @@ runBtn.addEventListener("click", runAnalysis);
 stageFilterEl.addEventListener("change", rerenderFilters);
 confidenceFilterEl.addEventListener("change", rerenderFilters);
 hideDrawEl.addEventListener("change", rerenderFilters);
+marketDivOnlyEl.addEventListener("change", rerenderFilters);
 
 helpBtn.addEventListener("click", () => helpPanel.classList.remove("hidden"));
 helpClose.addEventListener("click", () => helpPanel.classList.add("hidden"));

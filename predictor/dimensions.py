@@ -1,4 +1,4 @@
-"""多维综合分析：基础五维 + 大赛底蕴、阵容深度、进阶数据、赛程负荷 + 分析师研判。"""
+"""多维综合分析：十维框架 + 分析师研判（含市场共识校验）。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,14 @@ import math
 from dataclasses import dataclass, field
 
 from data.fixtures import Fixture
+from data.group_context import GroupContext, get_group_context, group_intensity_multiplier
 from data.head_to_head import HeadToHeadRecord, estimate_h2h, get_head_to_head
+from data.market_consensus import (
+    MarketConsensus,
+    compute_market_consensus,
+    market_multiplier,
+    model_market_divergence,
+)
 from data.schedule_load import ScheduleLoad, get_schedule_load, schedule_multiplier
 from data.team_extended import (
     AdvancedMetrics,
@@ -56,7 +63,9 @@ class MatchDimensionAnalysis:
     squad_depth: DimensionBlock
     advanced_metrics: DimensionBlock
     schedule_load: DimensionBlock
+    market_consensus: DimensionBlock
     analyst_verdict: AnalystVerdict
+    market: MarketConsensus | None = None
     xg_home_adj: float = 1.0
     xg_away_adj: float = 1.0
     confidence_adj: float = 0.0
@@ -83,7 +92,8 @@ _DIM_WEIGHTS = {
     "pedigree": 0.12,
     "depth": 0.11,
     "metrics": 0.11,
-    "schedule": 0.10,
+    "schedule": 0.09,
+    "market": 0.07,
 }
 
 
@@ -121,12 +131,16 @@ def _analyze_team_basics(
     home: Team, away: Team,
     home_prof: TeamProfile, away_prof: TeamProfile,
     fixture: Fixture,
+    group_ctx: GroupContext | None,
 ) -> tuple[DimensionBlock, float, float]:
     hf, h_def = form_multiplier(home_prof.form)
     af, a_def = form_multiplier(away_prof.form)
     h_ha = home_away_multiplier(home_prof.form, True)
     a_ha = home_away_multiplier(away_prof.form, False)
     mot_summary, mot_points, h_mot, a_mot = _motivation(fixture, home, away)
+
+    h_gm = group_intensity_multiplier(group_ctx, True)
+    a_gm = group_intensity_multiplier(group_ctx, False)
 
     h_form, a_form = home_prof.form, away_prof.form
     points = [
@@ -138,10 +152,18 @@ def _analyze_team_basics(
         f"{away.name_zh} 客场胜率 {a_form.away_win_rate*100:.0f}%。",
         *mot_points,
     ]
+    if group_ctx:
+        points.extend([
+            f"{group_ctx.group}组第{group_ctx.match_round}轮：{group_ctx.scenario}（战意{group_ctx.intensity}）。",
+            f"{home.name_zh}（预测第{group_ctx.home_standing}）：{group_ctx.home_needs}。",
+            f"{away.name_zh}（预测第{group_ctx.away_standing}）：{group_ctx.away_needs}。",
+        ])
+        mot_summary = f"{group_ctx.group}组{group_ctx.scenario}"
+
     return (
-        DimensionBlock("球队基础", mot_summary, points, "近期状态与主客场差异已纳入 xG 修正"),
-        hf * h_ha * h_mot / h_def,
-        af * a_ha * a_mot / a_def,
+        DimensionBlock("球队基础", mot_summary, points, "近期状态、主客场与出线形势已纳入 xG 修正"),
+        hf * h_ha * h_mot * h_gm / h_def,
+        af * a_ha * a_mot * a_gm / a_def,
     )
 
 
@@ -383,6 +405,24 @@ def _analyze_schedule(
     )
 
 
+def _analyze_market(home: Team, away: Team) -> tuple[DimensionBlock, float, float, MarketConsensus]:
+    mkt = compute_market_consensus(home, away)
+    h_mult = market_multiplier(mkt, "home")
+    a_mult = market_multiplier(mkt, "away")
+    points = [
+        f"市场隐含概率：主胜 {mkt.home_win_implied*100:.1f}% / 平局 {mkt.draw_implied*100:.1f}% / "
+        f"客胜 {mkt.away_win_implied*100:.1f}%。",
+        f"参考赔率（十进制）：主 {mkt.home_odds} / 平 {mkt.draw_odds} / 客 {mkt.away_odds}。",
+        f"市场热门：{mkt.favorite}（{mkt.margin*100:.1f}%）。",
+        mkt.note,
+        "市场反映全球资金流向与信息聚合，可与模型交叉验证。",
+    ]
+    return (
+        DimensionBlock("市场共识", mkt.favorite, points, "市场隐含概率作校验参考"),
+        h_mult, a_mult, mkt,
+    )
+
+
 def _build_analyst_verdict(
     home: Team, away: Team, fixture: Fixture,
     xg_h_adj: float, xg_a_adj: float,
@@ -391,6 +431,7 @@ def _build_analyst_verdict(
     h2h: HeadToHeadRecord,
     home_prof: TeamProfile,
     away_prof: TeamProfile,
+    market: MarketConsensus | None = None,
 ) -> AnalystVerdict:
     rating_diff = home.rating - away.rating
     max_p = max(win_p, draw_p, loss_p)
@@ -422,7 +463,19 @@ def _build_analyst_verdict(
         risk_tags.append("淘汰赛加时/点球")
         caveats.append("淘汰赛平局后加时与点球大战进一步增加随机性。")
 
-    effective_conf = max_p + conf_adj
+    market_note = ""
+    effective_conf_adj = conf_adj
+    if market:
+        div, direction, _div_points = model_market_divergence(market, win_p, draw_p, loss_p)
+        market_note = direction
+        if div >= 0.12:
+            risk_tags.append("市场分歧")
+            effective_conf_adj -= 0.02
+            caveats.append(f"模型与市场分歧 {div*100:.0f}pp：{direction}，建议降低仓位或观望。")
+        elif div <= 0.05:
+            risk_tags.append("市场一致")
+
+    effective_conf = max_p + effective_conf_adj
     if effective_conf >= 0.58:
         conf_level = "高"
     elif effective_conf >= 0.48:
@@ -442,9 +495,11 @@ def _build_analyst_verdict(
         pick = f"倾向平局（{draw_p*100:.1f}%）"
 
     summary = (
-        f"综合九维分析，{pick}。实力差 {rating_diff:+.0f} 分，"
-        f"五维修正后主队 xG 系数 {xg_h_adj:.2f}、客队 {xg_a_adj:.2f}。"
+        f"综合十维分析，{pick}。实力差 {rating_diff:+.0f} 分，"
+        f"十维修正后主队 xG 系数 {xg_h_adj:.2f}、客队 {xg_a_adj:.2f}。"
     )
+    if market_note:
+        summary += f" {market_note}。"
 
     return AnalystVerdict(
         summary=summary,
@@ -475,7 +530,10 @@ def analyze_match_dimensions(
         home.code, away.code, home.rating, away.rating
     )
 
-    basics, b_h, b_a = _analyze_team_basics(home, away, home_prof, away_prof, fixture)
+    group_ctx = get_group_context(fixture, home, away)
+    market_blk, mkt_h, mkt_a, market = _analyze_market(home, away)
+
+    basics, b_h, b_a = _analyze_team_basics(home, away, home_prof, away_prof, fixture, group_ctx)
     h2h_blk, h_h, h_a = _analyze_h2h(home, away, h2h)
     players, p_h, p_a = _analyze_players(home, away, home_prof, away_prof)
     tactical, t_h, t_a = _analyze_tactical(home, away, home_prof, away_prof)
@@ -488,11 +546,13 @@ def analyze_match_dimensions(
 
     xg_home = _weighted_combine({
         "basics": b_h, "h2h": h_h, "players": p_h, "tactical": t_h,
-        "external": e_h, "pedigree": ped_h, "depth": dep_h, "metrics": adv_h, "schedule": sch_h,
+        "external": e_h, "pedigree": ped_h, "depth": dep_h, "metrics": adv_h,
+        "schedule": sch_h, "market": mkt_h,
     })
     xg_away = _weighted_combine({
         "basics": b_a, "h2h": h_a, "players": p_a, "tactical": t_a,
-        "external": e_a, "pedigree": ped_a, "depth": dep_a, "metrics": adv_a, "schedule": sch_a,
+        "external": e_a, "pedigree": ped_a, "depth": dep_a, "metrics": adv_a,
+        "schedule": sch_a, "market": mkt_a,
     })
 
     xg_home = max(0.72, min(1.28, xg_home))
@@ -501,7 +561,7 @@ def analyze_match_dimensions(
     # 占位 verdict，win_p 由引擎二次填充；此处用临时值
     verdict = _build_analyst_verdict(
         home, away, fixture, xg_home, xg_away,
-        0.4, 0.25, 0.35, conf_adj, h2h, home_prof, away_prof,
+        0.4, 0.25, 0.35, conf_adj, h2h, home_prof, away_prof, market,
     )
 
     return MatchDimensionAnalysis(
@@ -514,7 +574,9 @@ def analyze_match_dimensions(
         squad_depth=depth,
         advanced_metrics=advanced,
         schedule_load=schedule,
+        market_consensus=market_blk,
         analyst_verdict=verdict,
+        market=market,
         xg_home_adj=xg_home,
         xg_away_adj=xg_away,
         confidence_adj=conf_adj,
@@ -532,10 +594,16 @@ def finalize_verdict(
     )
     home_prof = get_team_profile(home.code, home.rating, home.attack, home.defense)
     away_prof = get_team_profile(away.code, away.rating, away.attack, away.defense)
-    dim.analyst_verdict = _build_analyst_verdict(
+    verdict = _build_analyst_verdict(
         home, away, fixture, dim.xg_home_adj, dim.xg_away_adj,
-        win_p, draw_p, loss_p, dim.confidence_adj, h2h, home_prof, away_prof,
+        win_p, draw_p, loss_p, dim.confidence_adj, h2h, home_prof, away_prof, dim.market,
     )
+    dim.analyst_verdict = verdict
+    # 市场分歧可能调整了 conf_adj
+    if dim.market:
+        div, _, _ = model_market_divergence(dim.market, win_p, draw_p, loss_p)
+        if div >= 0.12:
+            dim.confidence_adj -= 0.02
 
 
 # 向后兼容
@@ -557,6 +625,17 @@ def dimensions_to_dict(d: MatchDimensionAnalysis) -> dict:
         "squad_depth": block(d.squad_depth),
         "advanced_metrics": block(d.advanced_metrics),
         "schedule_load": block(d.schedule_load),
+        "market_consensus": block(d.market_consensus),
+        "market_implied": {
+            "home_win": d.market.home_win_implied if d.market else 0,
+            "draw": d.market.draw_implied if d.market else 0,
+            "away_win": d.market.away_win_implied if d.market else 0,
+            "odds": {
+                "home": d.market.home_odds if d.market else 0,
+                "draw": d.market.draw_odds if d.market else 0,
+                "away": d.market.away_odds if d.market else 0,
+            },
+        } if d.market else {},
         "analyst_verdict": {
             "summary": v.summary,
             "risk_tags": v.risk_tags,
@@ -566,5 +645,5 @@ def dimensions_to_dict(d: MatchDimensionAnalysis) -> dict:
         },
         "xg_adjustments": {"home": round(d.xg_home_adj, 3), "away": round(d.xg_away_adj, 3)},
         "confidence_adj": round(d.confidence_adj, 3),
-        "dimension_count": 9,
+        "dimension_count": 10,
     }

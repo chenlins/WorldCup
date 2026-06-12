@@ -253,7 +253,7 @@ def _build_analysis(
         ht = get_team_profile(home.code, home.rating, home.attack, home.defense).tactics
         at = get_team_profile(away.code, away.rating, away.attack, away.defense).tactics
         tactical = (
-            f"{home.name_zh}（{ht.style}）预期 xG {lam_h:.2f}，九维修正系数 {dim.xg_home_adj:.2f}；"
+            f"{home.name_zh}（{ht.style}）预期 xG {lam_h:.2f}，十维修正系数 {dim.xg_home_adj:.2f}；"
             f"{away.name_zh}（{at.style}）预期 xG {lam_a:.2f}，修正系数 {dim.xg_away_adj:.2f}。"
             f"风格碰撞：{dim.tactical.summary}。"
         )
@@ -330,6 +330,7 @@ def _predict_match_internal(
         ("阵容深度", dim.squad_depth),
         ("进阶数据", dim.advanced_metrics),
         ("赛程负荷", dim.schedule_load),
+        ("市场共识", dim.market_consensus),
     ]:
         if block.impact and label not in factors:
             factors.append(label)
@@ -410,6 +411,15 @@ def predict_by_date(date: str) -> dict:
     upsets = [p for p in predictions if p.confidence < 0.42]
     if upsets:
         day_parts.append(f"存在 {len(upsets)} 场势均力敌或冷门可能较大的对决。")
+
+    market_div = [
+        p for p in predictions
+        if p.dimensions.get("analyst_verdict", {}).get("risk_tags", [])
+        and "市场分歧" in p.dimensions["analyst_verdict"]["risk_tags"]
+    ]
+    if market_div:
+        names = "、".join(f"{p.home_name} vs {p.away_name}" for p in market_div[:2])
+        day_parts.append(f"模型与市场分歧场次：{names}。")
 
     return {
         "date": date,
