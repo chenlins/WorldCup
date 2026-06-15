@@ -57,6 +57,9 @@ class MatchPrediction:
     is_knockout: bool
     uncertainty_note: str = ""
     dimensions: dict = field(default_factory=dict)
+    extra_mode: str = "none"
+    extended_analysis: dict | None = None
+    base_prediction: dict | None = None
 
 
 STAGE_XG_FACTOR = {
@@ -191,6 +194,34 @@ def _outcome_probs(scores: list[ScoreLine], knockout: bool) -> tuple[float, floa
     return win / total, draw / total, loss / total
 
 
+def _normalize_probs(win: float, draw: float, loss: float) -> tuple[float, float, float]:
+    total = win + draw + loss or 1.0
+    return win / total, draw / total, loss / total
+
+
+def _prediction_snapshot(
+    lam_h: float,
+    lam_a: float,
+    win_p: float,
+    draw_p: float,
+    loss_p: float,
+    scores: list[ScoreLine],
+    outcome: str,
+    confidence: float,
+) -> dict:
+    best = scores[0]
+    return {
+        "predicted_score": f"{best.home}-{best.away}",
+        "predicted_home_goals": round(lam_h, 2),
+        "predicted_away_goals": round(lam_a, 2),
+        "win_prob": round(win_p, 4),
+        "draw_prob": round(draw_p, 4),
+        "loss_prob": round(loss_p, 4),
+        "outcome": outcome,
+        "confidence": round(confidence, 4),
+    }
+
+
 def _build_analysis(
     home: Team,
     away: Team,
@@ -284,6 +315,7 @@ def _predict_match_internal(
     fixture: Fixture,
     home_code: str | None = None,
     away_code: str | None = None,
+    extra_mode: str = "none",
 ) -> MatchPrediction:
     if home_code and away_code:
         home = get_team(home_code)
@@ -335,6 +367,44 @@ def _predict_match_internal(
         if block.impact and label not in factors:
             factors.append(label)
 
+    base_snapshot = None
+    extended_dict = None
+    mode = (extra_mode or "none").lower()
+    if mode in ("human", "same_odds"):
+        from predictor.extended_analysis import extended_to_dict, run_extended_analysis
+
+        base_snapshot = _prediction_snapshot(
+            lam_h, lam_a, win_p, draw_p, loss_p, scores, outcome, confidence
+        )
+        ext = run_extended_analysis(
+            mode, home, away, fixture, win_p, draw_p, loss_p, lam_h, lam_a, dim.market
+        )
+        if ext:
+            lam_h *= ext.lam_home_factor
+            lam_a *= ext.lam_away_factor
+            scores = _score_distribution(lam_h, lam_a, fixture.is_knockout)
+            win_p, draw_p, loss_p = _outcome_probs(scores, fixture.is_knockout)
+            win_p += ext.win_adj
+            draw_p += ext.draw_adj
+            loss_p += ext.loss_adj
+            win_p, draw_p, loss_p = _normalize_probs(win_p, draw_p, loss_p)
+            best = scores[0]
+            outcome = (
+                "主胜" if win_p >= draw_p and win_p >= loss_p
+                else ("平局" if draw_p >= loss_p else "客胜")
+            )
+            confidence = max(
+                0.32,
+                min(0.92, max(win_p, draw_p, loss_p) + dim.confidence_adj + ext.confidence_delta),
+            )
+            reasons.insert(0, f"【{ext.mode_label}】{ext.summary}")
+            for pt in ext.points[:3]:
+                reasons.append(pt)
+            for tag in ext.tags:
+                if tag not in factors:
+                    factors.append(tag)
+            extended_dict = extended_to_dict(ext)
+
     return MatchPrediction(
         match_id=fixture.id,
         date=fixture.date,
@@ -364,6 +434,9 @@ def _predict_match_internal(
         is_knockout=fixture.is_knockout,
         uncertainty_note=uncertainty,
         dimensions=dimensions_to_dict(dim),
+        extra_mode=mode,
+        extended_analysis=extended_dict,
+        base_prediction=base_snapshot,
     )
 
 
@@ -376,12 +449,12 @@ def _predict_bracket_match(match_id: int) -> tuple[str, str]:
     return pred.home_code, pred.away_code
 
 
-def predict_match(match_id: int) -> MatchPrediction:
+def predict_match(match_id: int, extra_mode: str = "none") -> MatchPrediction:
     fixture = FIXTURE_BY_ID[match_id]
-    return _predict_match_internal(fixture)
+    return _predict_match_internal(fixture, extra_mode=extra_mode)
 
 
-def predict_by_date(date: str) -> dict:
+def predict_by_date(date: str, extra_mode: str = "none") -> dict:
     matches = fixtures_by_date(date)
     if not matches:
         return {
@@ -392,10 +465,15 @@ def predict_by_date(date: str) -> dict:
             "featured": None,
         }
 
-    predictions = [_predict_match_internal(m) for m in matches]
+    mode = (extra_mode or "none").lower()
+    predictions = [_predict_match_internal(m, extra_mode=mode) for m in matches]
     featured = max(predictions, key=lambda p: p.confidence)
 
     day_parts = []
+    if mode == "human":
+        day_parts.append("已启用人性分析（热门压力、生死战心态等）修正结果。")
+    elif mode == "same_odds":
+        day_parts.append("已启用同赔率赛事分析，模型概率已与历届同档位赛果融合。")
     stages = {}
     for p in predictions:
         stages.setdefault(p.stage, 0)
@@ -424,6 +502,7 @@ def predict_by_date(date: str) -> dict:
     return {
         "date": date,
         "match_count": len(predictions),
+        "extra_mode": mode,
         "matches": [prediction_to_dict(p) for p in predictions],
         "day_summary": "".join(day_parts),
         "featured": prediction_to_dict(featured),
@@ -463,4 +542,7 @@ def prediction_to_dict(p: MatchPrediction) -> dict:
         "is_knockout": p.is_knockout,
         "uncertainty_note": p.uncertainty_note,
         "dimensions": p.dimensions,
+        "extra_mode": p.extra_mode,
+        "extended_analysis": p.extended_analysis,
+        "base_prediction": p.base_prediction,
     }

@@ -5,6 +5,7 @@ const rowsEl = $("rows");
 const featuredEl = $("featured");
 const runBtn = $("runBtn");
 const matchDateEl = $("matchDate");
+const extraModeEl = $("extraMode");
 const stageFilterEl = $("stageFilter");
 const confidenceFilterEl = $("confidenceFilter");
 const hideDrawEl = $("hideDraw");
@@ -130,6 +131,47 @@ function renderDimensions(dim, match) {
   `;
 }
 
+function renderExtendedAnalysis(match) {
+  const ext = match.extended_analysis;
+  const base = match.base_prediction;
+  if (!ext) return "";
+
+  const points = (ext.points || [])
+    .map((p) => `<li>${escapeHtml(p)}</li>`)
+    .join("");
+  const tags = (ext.tags || [])
+    .map((t) => `<span class="risk-tag">${escapeHtml(t)}</span>`)
+    .join("");
+
+  let compareHtml = "";
+  if (base) {
+    compareHtml = `
+      <div class="base-compare">
+        <span>修正前：${escapeHtml(base.outcome)} ${escapeHtml(base.predicted_score)}
+          （置信 ${fmtPct(base.confidence)}）</span>
+        <span>→ 修正后：${escapeHtml(match.outcome)} ${escapeHtml(match.predicted_score)}
+          （置信 ${fmtPct(match.confidence)}）</span>
+      </div>`;
+  }
+
+  return `
+    <div class="verdict-box extended-box">
+      <h3>${escapeHtml(ext.title || ext.mode_label)}</h3>
+      <p class="verdict-summary">${escapeHtml(ext.summary || "")}</p>
+      <div class="risk-tags">${tags}</div>
+      ${compareHtml}
+      <ul class="dim-points">${points}</ul>
+      <div class="dim-impact">影响：${escapeHtml(ext.impact || "")}</div>
+    </div>
+  `;
+}
+
+function extraModeLabel(mode) {
+  if (mode === "human") return "人性分析";
+  if (mode === "same_odds") return "同赔率赛事分析";
+  return "";
+}
+
 function hasMarketDivergence(match) {
   const tags = match.dimensions?.analyst_verdict?.risk_tags || [];
   return tags.includes("市场分歧");
@@ -162,7 +204,7 @@ function renderFeatured(match) {
     <div class="rec-head">
       <div>
         <div class="rec-title">${escapeHtml(match.home_display)} vs ${escapeHtml(match.away_display)}</div>
-        <p>当日置信度最高场次 · ${escapeHtml(match.stage)}${match.group ? ` · ${match.group}组` : ""} · ${escapeHtml(match.city)}</p>
+        <p>当日置信度最高场次 · ${escapeHtml(match.stage)}${match.group ? ` · ${match.group}组` : ""} · ${escapeHtml(match.city)}${extraModeLabel(match.extra_mode) ? ` · ${extraModeLabel(match.extra_mode)}` : ""}</p>
       </div>
       <span class="badge">置信度 ${fmtPct(match.confidence)}</span>
     </div>
@@ -172,6 +214,7 @@ function renderFeatured(match) {
       <div class="metric"><span>主胜 / 平 / 客胜</span><strong>${fmtPct(match.win_prob)} / ${fmtPct(match.draw_prob)} / ${fmtPct(match.loss_prob)}</strong></div>
       <div class="metric"><span>期望进球 xG</span><strong>${match.predicted_home_goals} : ${match.predicted_away_goals}</strong></div>
     </div>
+    ${renderExtendedAnalysis(match)}
     ${
       match.dimensions?.analyst_verdict
         ? `<div class="verdict-box compact-verdict">
@@ -186,7 +229,7 @@ function renderFeatured(match) {
     <ol class="reasons">
       ${match.analysis.slice(0, 3).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
     </ol>
-    <div class="disclaimer">预测基于九维专业分析 + 分析师研判。足球偶然性极强，请结合风险标签理性参考。</div>
+    <div class="disclaimer">预测基于十维专业分析${match.extended_analysis ? ` + ${escapeHtml(match.extended_analysis.mode_label)}` : ""}。足球偶然性极强，请理性参考。</div>
   `;
 }
 
@@ -219,7 +262,7 @@ function renderRows(matches) {
         <span class="small ${outcomeClass(m.outcome)}">→ ${escapeHtml(m.outcome)}</span>
       </td>
       <td>${fmtPct(m.confidence)}</td>
-      <td class="detail-text">${escapeHtml(m.key_factors.join(" · "))}</td>
+      <td class="detail-text">${escapeHtml(m.key_factors.join(" · "))}${m.extended_analysis ? `<span class="small ext-badge">${escapeHtml(m.extended_analysis.mode_label)}</span>` : ""}</td>
       <td><button class="mini-btn detail-btn" data-id="${m.match_id}" type="button">详情</button></td>
     </tr>
   `
@@ -259,9 +302,10 @@ function renderDetail(match) {
     <div class="tactical-box">
       <strong>战术展望：</strong>${escapeHtml(match.tactical)}
     </div>
+    ${renderExtendedAnalysis(match)}
     ${renderDimensions(match.dimensions, match)}
     ${match.uncertainty_note ? `<div class="warn-box">${escapeHtml(match.uncertainty_note)}</div>` : ""}
-    <div class="disclaimer">本分析由五维综合模型生成，不构成投注建议。红牌、点球误判、临场伤病等不可预测因素仍可能改变结果。</div>
+    <div class="disclaimer">本分析由十维综合模型${match.extended_analysis ? `叠加${escapeHtml(match.extended_analysis.mode_label)}` : ""}生成，不构成投注建议。</div>
   `;
   detailModal.classList.remove("hidden");
 }
@@ -274,7 +318,10 @@ async function runAnalysis() {
   statusEl.textContent = `正在分析 ${date} 的世界杯赛事...`;
 
   try {
-    const res = await fetch(`/api/analyze?date=${encodeURIComponent(date)}`);
+    const mode = extraModeEl.value || "none";
+    const res = await fetch(
+      `/api/analyze?date=${encodeURIComponent(date)}&extra_mode=${encodeURIComponent(mode)}`
+    );
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || "分析请求失败");

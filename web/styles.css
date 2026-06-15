@@ -339,6 +339,33 @@ select {
   font-size: 12px;
 }
 
+.extended-box {
+  background: #f5f0ff;
+  border-color: #d8c8f0;
+}
+
+.extended-box h3 {
+  color: #5b3fa0;
+}
+
+.base-compare {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ext-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #ede4ff;
+  color: #5b3fa0;
+  font-weight: 800;
+}
+
 .help-item {
   border: 1px solid var(--line);
   border-radius: 8px;
