@@ -15,16 +15,11 @@ from predictor.dimensions import (
     dimensions_to_dict,
     finalize_verdict,
 )
+from predictor.score_refinement import refinement_to_dict, refine_score_prediction
+from predictor.types import ScoreLine
 
 # 固定种子保证预测可复现
 random.seed(2026)
-
-
-@dataclass
-class ScoreLine:
-    home: int
-    away: int
-    probability: float
 
 
 @dataclass
@@ -60,6 +55,7 @@ class MatchPrediction:
     extra_mode: str = "none"
     extended_analysis: dict | None = None
     base_prediction: dict | None = None
+    score_refinement: dict | None = None
 
 
 STAGE_XG_FACTOR = {
@@ -192,6 +188,19 @@ def _outcome_probs(scores: list[ScoreLine], knockout: bool) -> tuple[float, floa
                 draw += s.probability
     total = win + draw + loss or 1.0
     return win / total, draw / total, loss / total
+
+
+def _outcome_type_score(
+    h: int, a: int, knockout: bool,
+    win_p: float, draw_p: float, loss_p: float,
+) -> str:
+    if h > a:
+        return "主胜"
+    if h < a:
+        return "客胜"
+    if knockout:
+        return "主胜" if win_p >= loss_p else "客胜"
+    return "平局"
 
 
 def _normalize_probs(win: float, draw: float, loss: float) -> tuple[float, float, float]:
@@ -405,6 +414,48 @@ def _predict_match_internal(
                     factors.append(tag)
             extended_dict = extended_to_dict(ext)
 
+    scores, refined_score, lam_h, lam_a, refine_result = refine_score_prediction(
+        home, away, fixture, scores, win_p, draw_p, loss_p, lam_h, lam_a, dim.market
+    )
+    win_p, draw_p, loss_p = _outcome_probs(scores, fixture.is_knockout)
+    best = scores[0]
+    outcome = _outcome_type_score(best.home, best.away, fixture.is_knockout, win_p, draw_p, loss_p)
+    confidence = max(0.32, min(0.92, max(win_p, draw_p, loss_p) + dim.confidence_adj))
+
+    reasons = [r for r in reasons if not r.startswith("泊松模型最可能比分")]
+    top3 = scores[:3]
+    score_text = "、".join(f"{s.home}-{s.away}({s.probability*100:.1f}%)" for s in top3)
+    reasons.append(f"三步定位精选比分：{score_text}。")
+    for line in refine_result.reasoning:
+        reasons.append(line)
+    if refine_result.xg_quality_note:
+        reasons.append(f"xG 质量：{refine_result.xg_quality_note}")
+    if refine_result.odds_validation:
+        reasons.append(refine_result.odds_validation)
+    if "三步定位" not in factors:
+        factors.append("三步定位")
+
+    if mode == "bookmaker":
+        from predictor.bookmaker_score import analyze_bookmaker_optimal_score, bookmaker_to_extended_dict
+
+        model_score = f"{best.home}-{best.away}"
+        base_snapshot = _prediction_snapshot(
+            lam_h, lam_a, win_p, draw_p, loss_p, scores, outcome, confidence
+        )
+        bk = analyze_bookmaker_optimal_score(
+            home, away, scores, win_p, draw_p, loss_p, dim.market, model_score
+        )
+        bh, ba = bk.optimal_pick.home, bk.optimal_pick.away
+        reasons.insert(0, f"【庄家最优比分】{bk.summary}")
+        for pt in bk.points:
+            reasons.append(pt)
+        for tag in bk.tags:
+            if tag not in factors:
+                factors.append(tag)
+        extended_dict = bookmaker_to_extended_dict(bk)
+        best = ScoreLine(bh, ba, bk.optimal_pick.true_prob)
+        outcome = _outcome_type_score(bh, ba, fixture.is_knockout, win_p, draw_p, loss_p)
+
     return MatchPrediction(
         match_id=fixture.id,
         date=fixture.date,
@@ -437,6 +488,7 @@ def _predict_match_internal(
         extra_mode=mode,
         extended_analysis=extended_dict,
         base_prediction=base_snapshot,
+        score_refinement=refinement_to_dict(refine_result),
     )
 
 
@@ -474,6 +526,8 @@ def predict_by_date(date: str, extra_mode: str = "none") -> dict:
         day_parts.append("已启用人性分析（热门压力、生死战心态等）修正结果。")
     elif mode == "same_odds":
         day_parts.append("已启用同赔率赛事分析，模型概率已与历届同档位赛果融合。")
+    elif mode == "bookmaker":
+        day_parts.append("已启用庄家最优比分模式，预测比分已切换为庄家视角最优赛果。")
     stages = {}
     for p in predictions:
         stages.setdefault(p.stage, 0)
@@ -545,4 +599,5 @@ def prediction_to_dict(p: MatchPrediction) -> dict:
         "extra_mode": p.extra_mode,
         "extended_analysis": p.extended_analysis,
         "base_prediction": p.base_prediction,
+        "score_refinement": p.score_refinement,
     }

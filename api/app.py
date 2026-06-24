@@ -38,12 +38,15 @@ def create_app(config_path: str = "config.yaml") -> FastAPI:
         date: str = Query(..., description="YYYY-MM-DD"),
         extra_mode: str = Query(
             "none",
-            description="扩展分析：none=无, human=人性分析, same_odds=同赔率赛事分析",
+            description="扩展分析：none/human/same_odds/bookmaker",
         ),
     ):
         mode = extra_mode.lower()
-        if mode not in ("none", "human", "same_odds"):
-            raise HTTPException(status_code=400, detail="extra_mode 须为 none、human 或 same_odds")
+        if mode not in ("none", "human", "same_odds", "bookmaker"):
+            raise HTTPException(
+                status_code=400,
+                detail="extra_mode 须为 none、human、same_odds 或 bookmaker",
+            )
         try:
             return predict_by_date(date, extra_mode=mode)
         except Exception as e:
@@ -55,8 +58,11 @@ def create_app(config_path: str = "config.yaml") -> FastAPI:
         extra_mode: str = Query("none", description="扩展分析模式"),
     ):
         mode = extra_mode.lower()
-        if mode not in ("none", "human", "same_odds"):
-            raise HTTPException(status_code=400, detail="extra_mode 须为 none、human 或 same_odds")
+        if mode not in ("none", "human", "same_odds", "bookmaker"):
+            raise HTTPException(
+                status_code=400,
+                detail="extra_mode 须为 none、human、same_odds 或 bookmaker",
+            )
         try:
             return prediction_to_dict(predict_match(match_id, extra_mode=mode))
         except KeyError as e:

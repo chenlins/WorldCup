@@ -131,6 +131,41 @@ function renderDimensions(dim, match) {
   `;
 }
 
+function renderScoreRefinement(ref) {
+  if (!ref) return "";
+  const gr = ref.goal_range || {};
+  const candidates = (ref.candidate_scores || [])
+    .map((s) => `<span class="risk-tag">${escapeHtml(s)}</span>`)
+    .join("");
+  const steps = (ref.reasoning || [])
+    .map((r) => `<li>${escapeHtml(r)}</li>`)
+    .join("");
+  return `
+    <div class="verdict-box score-step-box">
+      <h3>比分三步定位</h3>
+      <div class="step-grid">
+        <div class="step-item">
+          <strong>第一步 · 胜平负</strong>
+          <p>${escapeHtml(ref.direction || "")}：${escapeHtml(ref.direction_detail || "")}</p>
+          ${ref.excluded_outcomes?.length ? `<p class="small">已排除：${escapeHtml(ref.excluded_outcomes.join("、"))}</p>` : ""}
+        </div>
+        <div class="step-item">
+          <strong>第二步 · 总进球</strong>
+          <p>${gr.min ?? "—"} - ${gr.max ?? "—"} 球：${escapeHtml(ref.goal_range_detail || "")}</p>
+        </div>
+        <div class="step-item">
+          <strong>第三步 · 精准比分</strong>
+          <p>首选 <strong>${escapeHtml(ref.final_score || "")}</strong>（${fmtPct(ref.final_probability || 0)}）</p>
+          <div class="risk-tags">${candidates}</div>
+        </div>
+      </div>
+      <ul class="dim-points">${steps}</ul>
+      ${ref.xg_quality_note ? `<p class="small">xG：${escapeHtml(ref.xg_quality_note)}</p>` : ""}
+      ${ref.odds_validation ? `<p class="small">${escapeHtml(ref.odds_validation)}</p>` : ""}
+    </div>
+  `;
+}
+
 function renderExtendedAnalysis(match) {
   const ext = match.extended_analysis;
   const base = match.base_prediction;
@@ -147,19 +182,44 @@ function renderExtendedAnalysis(match) {
   if (base) {
     compareHtml = `
       <div class="base-compare">
-        <span>修正前：${escapeHtml(base.outcome)} ${escapeHtml(base.predicted_score)}
+        <span>模型参考：${escapeHtml(base.outcome)} ${escapeHtml(base.predicted_score)}
           （置信 ${fmtPct(base.confidence)}）</span>
-        <span>→ 修正后：${escapeHtml(match.outcome)} ${escapeHtml(match.predicted_score)}
+        <span>→ ${ext.mode === "bookmaker" ? "庄家最优" : "修正后"}：${escapeHtml(match.outcome)} ${escapeHtml(match.predicted_score)}
           （置信 ${fmtPct(match.confidence)}）</span>
       </div>`;
   }
 
+  let oddsTable = "";
+  if (ext.mode === "bookmaker" && ext.top_picks?.length) {
+    const rows = ext.top_picks
+      .map(
+        (p) => `<tr>
+          <td><strong>${escapeHtml(p.score)}</strong></td>
+          <td>${fmtPct(p.true_prob)}</td>
+          <td>${p.jc_odds}</td>
+          <td>${p.euro_odds}</td>
+          <td>${(p.public_heat * 100).toFixed(0)}%</td>
+        </tr>`
+      )
+      .join("");
+    oddsTable = `
+      <div class="market-compare">
+        <h4>庄家期盼比分排行（竞彩/欧赔参考）</h4>
+        <table class="compare-table">
+          <thead><tr><th>比分</th><th>真实概率</th><th>竞彩赔率</th><th>欧赔均值</th><th>彩民热度</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <p class="small">${escapeHtml(ext.platform_note || "")}</p>
+      </div>`;
+  }
+
   return `
-    <div class="verdict-box extended-box">
+    <div class="verdict-box extended-box ${ext.mode === "bookmaker" ? "bookmaker-box" : ""}">
       <h3>${escapeHtml(ext.title || ext.mode_label)}</h3>
       <p class="verdict-summary">${escapeHtml(ext.summary || "")}</p>
       <div class="risk-tags">${tags}</div>
       ${compareHtml}
+      ${oddsTable}
       <ul class="dim-points">${points}</ul>
       <div class="dim-impact">影响：${escapeHtml(ext.impact || "")}</div>
     </div>
@@ -169,6 +229,7 @@ function renderExtendedAnalysis(match) {
 function extraModeLabel(mode) {
   if (mode === "human") return "人性分析";
   if (mode === "same_odds") return "同赔率赛事分析";
+  if (mode === "bookmaker") return "庄家最优比分";
   return "";
 }
 
@@ -302,6 +363,7 @@ function renderDetail(match) {
     <div class="tactical-box">
       <strong>战术展望：</strong>${escapeHtml(match.tactical)}
     </div>
+    ${renderScoreRefinement(match.score_refinement)}
     ${renderExtendedAnalysis(match)}
     ${renderDimensions(match.dimensions, match)}
     ${match.uncertainty_note ? `<div class="warn-box">${escapeHtml(match.uncertainty_note)}</div>` : ""}

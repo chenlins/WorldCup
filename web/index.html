@@ -28,6 +28,7 @@
               <option value="none">无</option>
               <option value="human">人性分析</option>
               <option value="same_odds">同赔率赛事分析</option>
+              <option value="bookmaker">庄家最优比分</option>
             </select>
           </label>
           <label>
@@ -63,7 +64,7 @@
           <details class="advanced">
             <summary>分析模型说明</summary>
             <p class="model-note">
-              十维加权修正 + 泊松模型 + 市场交叉验证：在九维基础上增加市场隐含概率校验，自动标注「市场分歧」场次；小组赛纳入出线轮次与积分需求分析。足球偶然性极强，预测仅供参考。
+              十维分析 + 比分三步定位法：先锁胜平负大方向，再框总进球区间，交叉筛选精准比分；结合 xG 质量与赔率交叉验证。足球偶然性极强，预测仅供参考。
             </p>
           </details>
           <button id="helpBtn" class="text-btn" type="button">查看分析维度说明 ?</button>

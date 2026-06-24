@@ -356,6 +356,20 @@ select {
   color: var(--muted);
 }
 
+.bookmaker-box {
+  background: #fff8f0;
+  border-color: #e8c9a0;
+}
+
+.bookmaker-box h3 {
+  color: #9a5a12;
+}
+
+.market-compare h4 {
+  margin: 10px 0 8px;
+  font-size: 14px;
+}
+
 .ext-badge {
   display: inline-block;
   margin-top: 4px;
@@ -364,6 +378,44 @@ select {
   background: #ede4ff;
   color: #5b3fa0;
   font-weight: 800;
+}
+
+.score-step-box {
+  background: #f0f7ff;
+  border-color: #c5d9f0;
+}
+
+.score-step-box h3 {
+  color: #1a5a9e;
+}
+
+.step-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.step-item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.step-item strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .step-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .help-item {
